@@ -1,4 +1,4 @@
-# A command line interface for the quoridor ai in board.nim
+# A command line interface for the quoridor ai in quoridor_board.nim
 #
 # Author: Peter Massey-Plantinga
 # Date: 4-3-14
@@ -9,16 +9,21 @@ from parseutils import parseInt
 import quoridor_board
 
 var times = [0, 0]
-var moves: seq[string]
+var moves = newSeq[string]()
 
+# Parse the args.
+# Usage:
+#   --player1time and --player2time are specified in seconds
+#     0 means human player
+#   
+#   any other argument is interpreted as a move
 for kind, key, val in getopt():
   case kind
   of cmdArgument:
-    if moves == nil:
-      moves = @[key]
-    else:
-      moves.add(key)
+    # Every unnamed argument is a move
+    moves.add(key)
   of cmdLongOption, cmdShortOption:
+    # Only valid argument names are player1time and player2time
     case key
     of "player1time":
       discard val.parseInt(times[0])
@@ -27,8 +32,9 @@ for kind, key, val in getopt():
     else:
       raise newException(EInvalidKey, "Unknown option: " & key)
   of cmdEnd:
-    assert false
+    assert false # Inconceivable
 
+# Print the board nicely
 proc print( b: ref Quoridor_Board ) =
   stdout.write("\n")
 
@@ -99,13 +105,16 @@ proc print( b: ref Quoridor_Board ) =
     stdout.write("\n")
   stdout.write("\n")
 
-var board = init_Quoridor_Board()
+
+# Start main program
+
+var qb = init_Quoridor_Board()
 
 if moves != nil:
   for m in moves:
-    discard board.move(m)
+    discard qb.move(m)
 
-board.print()
+qb.print()
 
 var move: string
 var winner, turn: int
@@ -120,18 +129,18 @@ while true:
       break
 
     elif move == "u":
-      board.undo(2)
+      qb.undo(2)
       turn = (turn + 1) mod 2
 
     else:
       try:
-        winner = board.move(move)
+        winner = qb.move(move)
         if winner != 0:
-          board.print()
+          qb.print()
           echo "Player " & $winner & " wins!"
           break
       except EInvalidValue:
         echo "Invalid move"
 
-  board.print()
+  qb.print()
 
