@@ -32,6 +32,10 @@ proc init_Quoridor_Board*(): ref Quoridor_Board =
 proc is_on_board(d: int): bool {.inline, nosideeffect.} =
   return d >= 0 and d < 17
 
+# Change x, y, o into a number for walls in path checkage
+proc linearize(x, y, o: int): int {.inline, nosideeffect.} =
+  return x - 1 + 8 * (y - 1) + o
+
 # Accessors
 proc wall_count*(b: ref Quoridor_Board; player: int): int =
   assert player == 1 or player == 2
@@ -184,7 +188,7 @@ proc heuristic(player, y: int): int {.inline, nosideeffect.} =
 
 # Finds the length of the shortest path for a player
 # Also keeps track of walls that would block the path
-
+#
 # Returns: length of the shortest path, ignoring the other player
 #   0 for no path
 proc path_length(b: ref Quoridor_Board; player: int): int =
@@ -283,7 +287,6 @@ proc path_length(b: ref Quoridor_Board; player: int): int =
 #   x, y = the desired location
 #
 # Returns: whether or not the move occured
-
 proc move_piece(b: ref Quoridor_Board; x, y: int): bool =
 
   let player = b.my_turn mod 2
@@ -311,8 +314,101 @@ proc move_piece(b: ref Quoridor_Board; x, y: int): bool =
 
   return false
 
+
+# Asserts a wall placement is legal
+#
+# Params:
+#   x = horizontal location of new wall
+#   y = vertical location of new wall
+#   o = orientation of new wall (vertical, 1, or horizontal, 2)
+
+proc is_legal_wall( b: ref Quoridor_Board; x, y, o: int ): bool =
+
+  # Make sure wall isn't in move land
+  assert x mod 2 == 1 and y mod 2 == 1
+
+  # Make sure orientation is valid
+  assert o == 1 or o == 2
+
+  # Check for out-of-bounds
+  if not is_on_board(x) or not is_on_board(y):
+    return false
+
+  # Make sure the player has walls left
+  if b.my_walls[b.my_turn mod 2] == 0:
+    return false
+
+  let y_add = o - 1
+  let x_add = o mod 2
+
+  if b.my_board[x][y] != 0 or
+      b.my_board[x + x_add][y + y_add] != 0 or
+      b.my_board[x - x_add][y - y_add] != 0:
+    return false
+
+  return true
+
+# Insert a wall at x, y, o
+proc wall_val( b: ref Quoridor_Board; x, y, o, val: int ) =
+
+  let x_add = o - 1
+  let y_add = o mod 2
+
+  b.my_board[x][y] = val
+  b.my_board[x + x_add][y + y_add] = val
+  b.my_board[x - x_add][y - y_add] = val
+
+# Checks for wall legality, and if legal, places the wall
+#
+# Params:
+#   x = the horizontal location
+#   y = the vertical location
+#   o = the orientation (1 for vertical, 2 for horizontal)
 proc place_wall( b: ref Quoridor_Board; x, y, o: int ): bool =
-  return false
+
+  if not b.is_legal_wall(x, y, o):
+    return false
+
+  # Add the wall for checking both player's paths
+  b.wall_val(x, y, o, 3)
+
+  var test_length_one, test_length_two : int
+  # Check player 1's path if the wall blocks it
+  if b.walls_in_path[0][linearize(x, y, o)]:
+    test_length_one = b.path_length(0)
+
+    if test_length_one == 0:
+
+      # remove wall
+      b.wall_val(x, y, o, 0)
+      return false
+
+  if b.walls_in_path[1][linearize(x, y, o)]:
+    test_length_two = b.path_length(1)
+
+    if test_length_two == 0:
+      
+      b.wall_val(x, y, o, 0)
+      return false
+
+  # Both players have a path, so update shortest paths
+  if test_length_one != 0:
+    b.path_lengths[0] = test_length_one
+
+  if test_length_two != 0:
+    b.path_lengths[1] = test_length_two
+
+  # Reduce the walls remaining
+  b.my_walls[b.my_turn mod 2] -= 1
+
+  # update turn
+  b.my_turn += 1
+
+  # add wall to the list of moves
+  b.moves.add([x, y, o])
+
+  return true
+
 
 proc move*( b: ref Quoridor_Board, move_string: string ): int =
   let move_array = move_string_to_array( move_string )
