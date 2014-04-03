@@ -210,25 +210,23 @@ proc path_length(b: ref Quoridor_Board; player: int): int =
   var h = heuristic(player, y)
 
   # To keep track of where we go
-  var paths: array[0 .. 9, array[0 .. 9, int]]
+  var paths: array[0 .. 17, array[0 .. 17, int]]
 
   # Starting location
-  paths[int(x / 2)][int(y / 2)] = 1
+  paths[x][y] = 1
 
   # This is a sort of priority queue, specific to this application
   # We'll only be adding elements of the same or slightly lower priority
   var nodes = initTable[int, seq[array[0 .. 2, int]]]()
 
   # add first node, current location
-  nodes[h] = @[[x, y, g]]
-
-  # current stores the node we're using on each iteration
-  var current: array[0 .. 2, int]
+  nodes[h] = @[[b.my_x[player], b.my_y[player], 0]]
   var key = h
 
   # while there are nodes left to evaluate
   while nodes.len != 0:
-    current = nodes[key][nodes[key].len - 1]
+    # current stores the node we're using on each iteration
+    let current = mget(nodes, key).pop
     x = current[0]
     y = current[1]
     g = current[2]
@@ -240,11 +238,14 @@ proc path_length(b: ref Quoridor_Board; player: int): int =
 
     # Try all moves
     for i in [[x - 2, y], [x, y - 2], [x + 2, y], [x, y + 2]]:
-      if (b.is_legal_move(i[0], i[1], x, y) and
-          paths[int(i[0]/2)][int(i[1]/2)] == 0):
+      if (b.is_legal_move(x = i[0], y = i[1], old_x = x, old_y = y) and
+          paths[i[0]][i[1]] == 0):
         h = heuristic(player, i[1])
-        paths[int(i[0] / 2)][int(i[1] / 2)] = 100 * x + y + 2
-        mget(nodes, int((g + h + 2)/2)).add([i[0], i[1], g + 2])
+        paths[i[0]][i[1]] = 100 * x + y + 2
+        if not hasKey(nodes, g + h + 2):
+          nodes.add(g + h + 2, @[[i[0], i[1], g + 2]])
+        else:
+          mget(nodes, g + h + 2).add([i[0], i[1], g + 2])
 
     # if this is the last of this weight
     # check for empty queue and change the key
@@ -253,14 +254,13 @@ proc path_length(b: ref Quoridor_Board; player: int): int =
       del(nodes, key)
 
       if nodes.len == 0:
+        for row in paths:
+          echo repr(row)
         b.my_board[other_x][other_y] = other_player + 1
         return 0
 
       while not hasKey(nodes, key):
-        key += 1
-
-    else:
-      discard mget(nodes, key).pop
+        key += 2
 
   if nodes.len == 0:
     b.my_board[other_x][other_y] = other_player + 1
@@ -271,11 +271,11 @@ proc path_length(b: ref Quoridor_Board; player: int): int =
     b.walls_in_path[player][i] = false
   var old_x, old_y: int
 
-  while paths[int(x/2)][int(y/2)] != 1:
+  while paths[x][y] != 1:
     old_x = x
     old_y = y
-    x = int( paths[int(x/2)][int(y/2)] / 100 )
-    y = paths[int(old_x/2)][int(y/2)] mod 100 - 2
+    x = int( paths[x][y] / 100 )
+    y = paths[old_x][y] mod 100 - 2
     #add_walls(player, x, y, old_x, old_y)
 
   b.my_board[other_x][other_y] = other_player + 1
@@ -293,7 +293,7 @@ proc move_piece(b: ref Quoridor_Board; x, y: int): bool =
   let old_x = b.my_x[player]
   let old_y = b.my_y[player]
 
-  if b.is_legal_move(x = x, y = y, old_x = old_x, old_y = old_y):
+  if b.is_legal_move(x, y, old_x, old_y):
 
     # make the move
     b.my_x[player] = x
@@ -302,7 +302,7 @@ proc move_piece(b: ref Quoridor_Board; x, y: int): bool =
     b.my_board[x][y] = player + 1
 
     # update shortest path length
-    #b.path_lengths[player] = b.path_length(player = player)
+    b.path_lengths[player] = b.path_length(player)
 
     # update turn
     b.my_turn += 1
@@ -314,14 +314,12 @@ proc move_piece(b: ref Quoridor_Board; x, y: int): bool =
 
   return false
 
-
 # Asserts a wall placement is legal
 #
 # Params:
 #   x = horizontal location of new wall
 #   y = vertical location of new wall
 #   o = orientation of new wall (vertical, 1, or horizontal, 2)
-
 proc is_legal_wall( b: ref Quoridor_Board; x, y, o: int ): bool =
 
   # Make sure wall isn't in move land
