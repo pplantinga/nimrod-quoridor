@@ -5,6 +5,8 @@
 # Start Date: Mar 30, 2014
 
 import tables
+from math import random, randomize
+from times import getTime, toSeconds, cpuTime
 
 # The Quoridor Board type includes all information about a game
 type
@@ -25,7 +27,24 @@ proc init_Quoridor_Board*(): ref Quoridor_Board =
   qb.walls = [10, 10]
   qb.moves = @[]
   qb.path_lengths = [8, 8]
+  
+  # Generate random numbers based on the time
+  randomize(int(getTime().toSeconds()))
+  qb.openings = [random(6), random(6)]
   return qb
+
+proc copy(qb: ref Quoridor_board): ref Quoridor_Board =
+  var new_qb = new(Quoridor_Board)
+  new_qb.turn = qb.turn
+  new_qb.xs = qb.xs
+  new_qb.ys = qb.ys
+  new_qb.board = qb.board
+  new_qb.walls = qb.walls
+  new_qb.moves = qb.moves
+  new_qb.openings = qb.openings
+  new_qb.path_lengths = qb.path_lengths
+  new_qb.walls_in_path = qb.walls_in_path
+  return new_qb
 
 # Asserts a move is within the limits of the board.
 proc is_on_board(d: int): bool {.inline, nosideeffect.} =
@@ -33,7 +52,7 @@ proc is_on_board(d: int): bool {.inline, nosideeffect.} =
 
 # Change x, y, o into a number for walls in path checkage
 proc linearize(x, y, o: int): int {.inline, nosideeffect.} =
-  return x - 1 + 8 * (y - 1) + o
+  return (x - 1) + 8 * (y - 1) + (o - 1)
 
 # Accessors for displaying the board to the world
 proc wall_count*(qb: ref Quoridor_Board; player: int): int =
@@ -74,6 +93,7 @@ assert move_string_to_array("e8")[2] == 0
 assert move_string_to_array("b6h")[0] == 3
 assert move_string_to_array("b6h")[1] == 11
 assert move_string_to_array("b6h")[2] == 2
+
 # Check if this piece movement is legal
 #
 # Params:
@@ -149,6 +169,32 @@ proc heuristic(player, y: int): int {.inline, nosideeffect.} =
   else:
     return y
 
+# Add walls that would block a move to a list
+#
+# Params:
+#   player = the player who's path would be blocked
+#   x, y = to location
+#   old_x, old_y = from location
+proc add_walls(qb: ref Quoridor_Board; player, x, y, old_x, old_y: int) =
+  let avg_x = int((x + old_x) / 2)
+  let avg_y = int((y + old_y) / 2)
+
+  # horizontal move
+  if abs(x - old_x) == 2:
+    if is_on_board(y - 1):
+      qb.walls_in_path[player][linearize(avg_x, y - 1, 1)] = true
+
+    if is_on_board(y + 1):
+      qb.walls_in_path[player][linearize(avg_x, y + 1, 1)] = true
+
+  else:
+    # vertical move
+    if is_on_board(x - 1):
+      qb.walls_in_path[player][linearize(x - 1, avg_y, 2)] = true
+
+    if is_on_board(x + 1):
+      qb.walls_in_path[player][linearize(x + 1, avg_y, 2)] = true
+
 # Finds the length of the shortest path for a player
 # Also keeps track of walls that would block the path
 #
@@ -189,6 +235,9 @@ proc path_length(qb: ref Quoridor_Board; player: int): int =
   # while there are nodes left to evaluate
   while nodes.len != 0:
     # current stores the node we're using on each iteration
+    if mget(nodes, key).len == 0:
+      break
+
     let current = mget(nodes, key).pop
     x = current[0]
     y = current[1]
@@ -217,8 +266,6 @@ proc path_length(qb: ref Quoridor_Board; player: int): int =
       del(nodes, key)
 
       if nodes.len == 0:
-        for row in paths:
-          echo repr(row)
         qb.board[other_x][other_y] = other_player + 1
         return 0
 
@@ -239,7 +286,7 @@ proc path_length(qb: ref Quoridor_Board; player: int): int =
     old_y = y
     x = int(paths[x][y] / 100)
     y = paths[old_x][y] mod 100 - 2
-    #add_walls(player, x, y, old_x, old_y)
+    qb.add_walls(player, x, y, old_x, old_y)
 
   qb.board[other_x][other_y] = other_player + 1
   return int(g / 2)
@@ -402,6 +449,340 @@ proc place_wall(qb: ref Quoridor_Board; x, y, o: int): bool =
   qb.moves.add([x, y, o])
 
   return true
+
+# Generate opening moves
+proc opening(turn, which: int): array[0 .. 2, int] =
+  assert turn < 8
+  assert turn >= 0
+  assert which < 6
+  assert which >= 0
+
+  # Always start by moving two ahead
+  let initial_array = [[8, 14, 0], [8, 2, 0], [8, 12, 0], [8, 14, 0]]
+
+  if turn < 4:
+    return initial_array[turn]
+
+  # Different openings, moves 4-8
+
+  let openings = [[[8, 10, 0], [8, 6, 0], [9, 11, 2], [9, 5, 2]],
+    [[9, 13, 2], [9, 3, 2], [8, 10, 0], [8, 6, 0]],
+    [[9, 15, 1], [9, 1, 1], [9, 13, 2], [9, 3, 2]],
+    [[8, 10, 0], [8, 6, 0], [7, 11, 2], [7, 5, 2]],
+    [[7, 13, 2], [7, 3, 2], [8, 10, 0], [8, 6, 0]],
+    [[7, 15, 1], [7, 1, 1], [7, 13, 2], [7, 3, 2]]]
+
+  return openings[which][turn - 4]
+
+# Evaluate function for Negascout
+#
+# Boards look better if your path is shorter than your opponent
+# And if you have more walls than your opponent
+#
+# Negative numbers are good for player 1, positive are good for 2
+proc evaluate(qb: ref Quoridor_Board): int =
+  let won =
+    if qb.ys[0] == 0: -100
+    elif qb.ys[1] == 16: 100
+    else: 0
+  return (
+    won -
+    qb.walls[0] +
+    qb.walls[1] +
+    qb.path_lengths[0] -
+    qb.path_lengths[1]
+  )
+
+# Negascout algorithm, a variation of the minimax algorithm, which
+# recursively examines possible moves for both players and evaluates
+# them, looking for the best one
+#
+# Params:
+#   qb = The board to search for a move on
+#   depth = how many moves deep to search
+#   a, b = alpha and beta for pruning unecessary sub-trees
+#   seconds, t0 = time limit and time of beginning the search
+#   best = best move so far for scouting
+#
+# Returns:
+#   best move that could be found in form [x, y, o, score]
+proc negascout(
+    qb: ref Quoridor_Board;
+    depth, a, b: int;
+    seconds, t0: float;
+    best: ref array[0 .. 3, int]): array[0 .. 3, int] =
+
+  # Which turn is it?
+  let t = qb.turn mod 2
+
+  # We've reached the end of our rope
+  if depth <= 0 or
+      qb.ys[0] == 0 or
+      qb.ys[1] == 16 or
+      cputime() - t0 > seconds:
+    if t == 0:
+      return [0, 0, 0, qb.evaluate()]
+    else:
+      return [0, 0, 0, -qb.evaluate()]
+
+  # initialize values
+  var alpha = a
+  var beta = b
+  var scout_val = beta
+  var score: int
+  var opponent_move: array[0 .. 3, int]
+  var best_move: array[0 .. 3, int]
+  var old_x = qb.xs[t]
+  var old_y = qb.ys[t]
+  var old_path_length = qb.path_lengths[t]
+  var first = true
+  var test_board = qb.copy()
+
+  # We'll only do this for the root node, where we have a best move recorded
+  if best != nil:
+
+    if best[2] == 0:
+      discard test_board.move_piece(best[0], best[1])
+    else:
+      discard test_board.place_wall(best[0], best[1], best[2])
+
+    opponent_move = negascout(
+      test_board,
+      depth - 1,
+      -scout_val,
+      -alpha,
+      seconds,
+      t0,
+      nil
+    )
+
+    alpha = -opponent_move[3]
+    best_move[0] = best[0]
+    best_move[1] = best[1]
+    best_move[2] = best[2]
+    best_move[3] = best[3]
+    first = false
+
+  # Check possible moves for a good one
+  for i in (
+    [[old_x - 2, old_y],
+    [old_x, old_y - 2],
+    [old_x + 2, old_y],
+    [old_x, old_y + 2]]
+  ):
+    # Don't check if not on board
+    if not is_on_board(i[0]) or not is_on_board(i[1]):
+      continue
+
+    # legal and we haven't checked it already
+    if qb.is_legal_move(i[0], i[1], old_x, old_y) and
+        (best == nil or
+          best[2] != 0 or best[1] != i[1] or best[0] != i[0]):
+      test_board = qb.copy()
+      discard test_board.move_piece(i[0], i[1])
+
+      # Don't consider moves that don't shorten our path
+      # This is usually bad, and sometimes the computer will make a
+      # dumb move to avoid getting blocked by a wall
+      if test_board.path_lengths[t] >= old_path_length:
+        continue
+
+      opponent_move = negascout(
+        test_board,
+        depth - 1,
+        -scout_val,
+        -alpha,
+        seconds,
+        t0,
+        nil
+      )
+
+      if alpha < -opponent_move[3] and
+          -opponent_move[3] < beta and
+          not first:
+        opponent_move = negascout(
+          test_board,
+          depth - 1,
+          -beta,
+          -alpha,
+          seconds,
+          t0,
+          nil
+        )
+
+      if -opponent_move[3] > alpha:
+        alpha = -opponent_move[3]
+        best_move = [i[0], i[1], 0, alpha]
+
+      if alpha >= beta or cputime() - t0 > seconds:
+        return best_move
+
+      scout_val = alpha + 1
+
+      if first:
+        first = false
+
+    elif qb.board[i[0]][i[1]] != 0:
+
+      # There's a piece where we can go, so check jumps
+      for j in (
+        [[i[0] - 2, i[1]],
+        [i[0], i[1] - 2],
+        [i[0] + 2, i[1]],
+        [i[0], i[1] + 2]]
+      ):
+        if qb.is_legal_move(j[0], j[1], old_x, old_y):
+          test_board = qb.copy()
+          discard test_board.move_piece(j[0], j[1])
+
+          # Don't consider jumps that make our length longer
+          # There can be situations where the only available move is
+          # a jump that doesn't make our path shorter, so examine those.
+          if test_board.path_lengths[t] > old_path_length:
+            continue
+
+          opponent_move = negascout(
+            test_board,
+            depth - 1,
+            -scout_val,
+            -alpha,
+            seconds,
+            t0,
+            nil
+          )
+
+          if alpha < -opponent_move[3] and
+              -opponent_move[3] < beta and
+              not first:
+            opponent_move = negascout(
+              test_board,
+              depth - 1,
+              -beta,
+              -alpha,
+              seconds,
+              t0,
+              nil
+            )
+
+          if -opponent_move[3] > alpha:
+            alpha = -opponent_move[3]
+            best_move = [j[0], j[1], 0, alpha]
+
+          if alpha >= beta or cputime() - t0 > seconds:
+            return best_move
+
+          scout_val = alpha + 1
+
+          if first:
+            first = false
+
+  # Look at some possible walls and evaluate effectiveness
+  for x in countup(1, 15, 2):
+    for y in countup(1, 15, 2):
+      for o in 1 .. 2:
+
+        # limit to walls in the opponents path,
+        # or walls in their own path, but opposite orientation to block
+        if qb.walls_in_path[(t + 1) mod 2][linearize(x, y, o)] or
+            (opponent_move[2] == 1 and opponent_move[0] == x and
+              (opponent_move[1] == y and o == 2 or
+                abs(opponent_move[1] - y) == 2 and o == 1) or
+            (opponent_move[2] == 2 and opponent_move[1] == y and
+              (opponent_move[0] == x and o == 1 or
+                abs(opponent_move[0] - x) == 2 and o == 2))) or
+
+            abs(x - old_x) == 1 and abs(y - old_y) == 1 or
+
+            abs(x - qb.xs[(t + 1) mod 2]) == 1 and
+              abs(y - qb.ys[(t + 1) mod 2]) == 1:
+
+          # some testing done twice, but faster to test than allocate
+          if qb.is_legal_wall(x, y, o):
+
+            test_board = qb.copy()
+            if test_board.place_wall(x, y, o):
+
+              score = -negascout(
+                test_board,
+                depth - 1,
+                -scout_val,
+                -alpha,
+                seconds,
+                t0,
+                nil
+              )[3]
+
+              if alpha < score and score < beta and not first:
+                score = -negascout(
+                  test_board,
+                  depth - 1,
+                  -beta,
+                  -alpha,
+                  seconds,
+                  t0,
+                  nil
+                )[3]
+
+              if score > alpha:
+                best_move = [x, y, o, score]
+                alpha = score
+
+              if alpha >= beta or cputime() - t0 > seconds:
+                return best_move
+
+              scout_val = alpha + 1
+
+  return best_move
+
+# AI_move picks the best move via negascout algorithm and does it.
+#
+# Params:
+#   seconds = length of time allowed to think about a move
+#
+# Returns: the move string (e.g. 'e3' or 'b7v')
+#   with a 'w' at the end if this move ended the game.
+proc ai_move*(qb: ref Quoridor_Board; seconds: float): string =
+
+  # Whether or not we've moved yet
+  var moved = false
+
+  # try an opening move
+  if qb.turn < 8:
+    let opening_move = opening(qb.turn, qb.openings[qb.turn mod 2])
+
+    if opening_move[2] != 0:
+      if qb.place_wall(opening_move[0], opening_move[1], opening_move[2]):
+        moved = true
+    elif qb.move_piece(opening_move[0], opening_move[1]):
+      moved = true
+
+  # If we didn't do an opening move
+  if not moved:
+    var i = 2
+    var move = new(array[0 .. 3, int])
+    var test_move: array[0 .. 3, int]
+    var t0 = cputime()
+    
+    # iterative deepening
+    while i < 100:
+      test_move = negascout(qb.copy(), i, -1000, 1000, seconds, t0, move)
+      i += 1
+      if cputime() - t0 < seconds and i < 100:
+        move[0] = test_move[0]
+        move[1] = test_move[1]
+        move[2] = test_move[2]
+      else:
+        break
+
+    # Print the level that we got to
+    debugEcho("Level is " & $i)
+
+    if move[2] != 0:
+      discard qb.place_wall(move[0], move[1], move[2])
+    else:
+      discard qb.move_piece(move[0], move[1])
+
+  return "e2hw"
 
 # Alters board state with a move if legal.
 #

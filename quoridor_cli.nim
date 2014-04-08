@@ -5,10 +5,10 @@
 
 import parseopt
 from strutils import strip
-from parseutils import parseInt
+from parseutils import parseFloat
 import quoridor_board
 
-var times = [0, 0]
+var times = [0.0, 0.0]
 var moves = newSeq[string]()
 
 # Parse the args.
@@ -26,9 +26,9 @@ for kind, key, val in getopt():
     # Only valid argument names are player1time and player2time
     case key
     of "player1time":
-      discard val.parseInt(times[0])
+      discard val.parseFloat(times[0])
     of "player2time":
-      discard val.parseInt(times[1])
+      discard val.parseFloat(times[1])
     else:
       raise newException(EInvalidKey, "Unknown option: " & key)
   of cmdEnd:
@@ -142,5 +142,15 @@ while true:
       except EInvalidValue:
         echo "Invalid move"
 
+  else:
+    # Player is a computer
+    echo "turn is " & $turn
+    move = qb.ai_move(times[turn])
+    if move.len > 2 and move[2] == 'w':
+      qb.print()
+      echo "Player " & $(turn + 1) & " wins!"
+      break
+
   qb.print()
+  turn = (turn + 1) mod 2
 
