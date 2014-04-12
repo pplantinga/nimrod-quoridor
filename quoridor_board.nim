@@ -17,6 +17,9 @@ type
     moves: seq[array[0 .. 2, int]]
     walls_in_path: array[0 .. 1, array[0 .. 127, bool]]
 
+# This isn't mutually recursive, I just want init to be at the top
+proc path_length(qb: ref Quoridor_Board; player: int): int
+
 # Init function returns a reference to a quoridor board.
 proc init_Quoridor_Board*(): ref Quoridor_Board =
   var qb = new(Quoridor_Board)
@@ -26,12 +29,18 @@ proc init_Quoridor_Board*(): ref Quoridor_Board =
   qb.board[8][0] = 2
   qb.walls = [10, 10]
   qb.moves = @[]
-  qb.path_lengths = [8, 8]
+  qb.path_lengths = [qb.path_length(0), qb.path_length(1)]
   
   # Generate random numbers based on the time
   randomize(int(getTime().toSeconds()))
   qb.openings = [random(6), random(6)]
   return qb
+
+var tqb = init_Quoridor_Board()
+assert tqb.board[tqb.xs[0]][tqb.ys[0]] == 1
+assert tqb.board[tqb.xs[1]][tqb.ys[1]] == 2
+#debugEcho(repr(tqb.path_lengths))
+#assert tqb.path_lengths[1] == 8
 
 proc copy(qb: ref Quoridor_board): ref Quoridor_Board =
   var new_qb = new(Quoridor_Board)
@@ -50,9 +59,25 @@ proc copy(qb: ref Quoridor_board): ref Quoridor_Board =
 proc is_on_board(d: int): bool {.inline, nosideeffect.} =
   return d >= 0 and d < 17
 
+assert is_on_board(0)
+assert (not is_on_board(-1))
+assert is_on_board(16)
+assert (not is_on_board(17))
+
 # Change x, y, o into a number for walls in path checkage
 proc linearize(x, y, o: int): int {.inline, nosideeffect.} =
   return (x - 1) + 8 * (y - 1) + (o - 1)
+
+assert linearize(1, 1, 1) == 0
+assert linearize(15, 15, 2) == 127
+for i in countup(1, 15, 2):
+  assert tqb.walls_in_path[0][linearize(7, i, 2)]
+  assert tqb.walls_in_path[1][linearize(7, i, 2)]
+  assert tqb.walls_in_path[0][linearize(9, i, 2)]
+  assert tqb.walls_in_path[1][linearize(9, i, 2)]
+  assert (not tqb.walls_in_path[0][linearize(9, i, 1)])
+  if i != 7 and i != 9:
+    assert (not tqb.walls_in_path[1][linearize(i, 5, 2)])
 
 # Accessors for displaying the board to the world
 proc wall_count*(qb: ref Quoridor_Board; player: int): int =
@@ -62,6 +87,9 @@ proc board_value*(qb: ref Quoridor_Board; x, y: int): int =
   assert is_on_board(x) and is_on_board(y)
   return qb.board[x][y]
 
+assert tqb.wall_count(1) == 10
+assert tqb.board_value(8, 16) == 1
+
 # Translates moves from strings like 'a3h' to a more useful format
 # 
 # Returns: array of the form [x, y, o]
@@ -69,9 +97,10 @@ proc board_value*(qb: ref Quoridor_Board; x, y: int): int =
 #   1 for vertical wall placement, 2 for horizontal wall
 proc move_string_to_array(move_string: string): array[0 .. 2, int] =
 
+  assert move_string.len == 2 or move_string.len == 3
   assert move_string[0] >= 'a' and move_string[0] <= 'i'
   assert move_string[1] >= '1' and move_string[1] <= '9'
-  assert len(move_string) < 3 or move_string[2] == 'h' or move_string[2] == 'v'
+  assert move_string.len == 2 or move_string[2] == 'h' or move_string[2] == 'v'
 
   var orientation = 0
   var is_wall = 0
@@ -160,6 +189,10 @@ proc is_legal_move(qb: ref Quoridor_Board; x, y, old_x, old_y: int): bool =
     return true
   else:
     return false
+
+assert tqb.is_legal_move(x = 8, y = 12, old_x = 8, old_y = 14)
+assert tqb.is_legal_move(x = 8, y = 10, old_x = 8, old_y = 12)
+assert tqb.is_legal_move(x = 6, y = 0, old_x = 8, old_y = 2)
 
 # Measure straight-line distance to the goal for A* purposes
 proc heuristic(player, y: int): int {.inline, nosideeffect.} =
@@ -261,7 +294,7 @@ proc path_length(qb: ref Quoridor_Board; player: int): int =
 
     # if this is the last of this weight
     # check for empty queue and change the key
-    if nodes[key].len == 1:
+    if nodes[key].len == 0:
 
       del(nodes, key)
 
@@ -357,6 +390,9 @@ proc move_piece(qb: ref Quoridor_Board; x, y: int): bool =
 
   return false
 
+assert tqb.move_piece(8, 14)
+assert tqb.path_lengths[0] == 7
+
 # Asserts a wall placement is legal
 #
 # Params:
@@ -379,8 +415,8 @@ proc is_legal_wall(qb: ref Quoridor_Board; x, y, o: int): bool =
   if qb.walls[qb.turn mod 2] == 0:
     return false
 
-  let y_add = o - 1
-  let x_add = o mod 2
+  let x_add = o - 1
+  let y_add = o mod 2
 
   if qb.board[x][y] != 0 or
       qb.board[x + x_add][y + y_add] != 0 or
@@ -458,7 +494,7 @@ proc opening(turn, which: int): array[0 .. 2, int] =
   assert which >= 0
 
   # Always start by moving two ahead
-  let initial_array = [[8, 14, 0], [8, 2, 0], [8, 12, 0], [8, 14, 0]]
+  let initial_array = [[8, 14, 0], [8, 2, 0], [8, 12, 0], [8, 4, 0]]
 
   if turn < 4:
     return initial_array[turn]
@@ -489,9 +525,11 @@ proc evaluate(qb: ref Quoridor_Board): int =
     won -
     qb.walls[0] +
     qb.walls[1] +
-    qb.path_lengths[0] -
-    qb.path_lengths[1]
+    2 * qb.path_lengths[0] -
+    2 * qb.path_lengths[1]
   )
+
+assert tqb.evaluate != 0
 
 # Negascout algorithm, a variation of the minimax algorithm, which
 # recursively examines possible moves for both players and evaluates
@@ -510,7 +548,7 @@ proc negascout(
     qb: ref Quoridor_Board;
     depth, a, b: int;
     seconds, t0: float;
-    best: ref array[0 .. 3, int]): array[0 .. 3, int] =
+    best: ref array[0 .. 2, int]): array[0 .. 3, int] =
 
   # Which turn is it?
   let t = qb.turn mod 2
@@ -521,9 +559,9 @@ proc negascout(
       qb.ys[1] == 16 or
       cputime() - t0 > seconds:
     if t == 0:
-      return [0, 0, 0, qb.evaluate()]
-    else:
       return [0, 0, 0, -qb.evaluate()]
+    else:
+      return [0, 0, 0, qb.evaluate()]
 
   # initialize values
   var alpha = a
@@ -542,26 +580,27 @@ proc negascout(
   if best != nil:
 
     if best[2] == 0:
-      discard test_board.move_piece(best[0], best[1])
+      if test_board.move_piece(best[0], best[1]):
+        first = false
     else:
-      discard test_board.place_wall(best[0], best[1], best[2])
+      if test_board.place_wall(best[0], best[1], best[2]):
+        first = false
 
-    opponent_move = negascout(
-      test_board,
-      depth - 1,
-      -scout_val,
-      -alpha,
-      seconds,
-      t0,
-      nil
-    )
+    if not first:
+      opponent_move = negascout(
+        test_board,
+        depth - 1,
+        -scout_val,
+        -alpha,
+        seconds,
+        t0,
+        nil
+      )
 
-    alpha = -opponent_move[3]
-    best_move[0] = best[0]
-    best_move[1] = best[1]
-    best_move[2] = best[2]
-    best_move[3] = best[3]
-    first = false
+      alpha = -opponent_move[3]
+      best_move[0] = best[0]
+      best_move[1] = best[1]
+      best_move[2] = best[2]
 
   # Check possible moves for a good one
   for i in (
@@ -574,10 +613,15 @@ proc negascout(
     if not is_on_board(i[0]) or not is_on_board(i[1]):
       continue
 
+    # Don't check if we've already tried it
+    if best != nil and
+        best[0] == i[0] and
+        best[1] == i[1] and
+        best[2] == 0:
+      continue
+
     # legal and we haven't checked it already
-    if qb.is_legal_move(i[0], i[1], old_x, old_y) and
-        (best == nil or
-          best[2] != 0 or best[1] != i[1] or best[0] != i[0]):
+    if qb.is_legal_move(i[0], i[1], old_x, old_y):
       test_board = qb.copy()
       discard test_board.move_piece(i[0], i[1])
 
@@ -597,6 +641,7 @@ proc negascout(
         nil
       )
 
+      # Re-check
       if alpha < -opponent_move[3] and
           -opponent_move[3] < beta and
           not first:
@@ -651,6 +696,7 @@ proc negascout(
             nil
           )
 
+          # Re-check
           if alpha < -opponent_move[3] and
               -opponent_move[3] < beta and
               not first:
@@ -712,6 +758,7 @@ proc negascout(
                 nil
               )[3]
 
+              # Re-check
               if alpha < score and score < beta and not first:
                 score = -negascout(
                   test_board,
@@ -749,6 +796,7 @@ proc ai_move*(qb: ref Quoridor_Board; seconds: float): string =
   # try an opening move
   if qb.turn < 8:
     let opening_move = opening(qb.turn, qb.openings[qb.turn mod 2])
+    echo repr(opening_move)
 
     if opening_move[2] != 0:
       if qb.place_wall(opening_move[0], opening_move[1], opening_move[2]):
@@ -759,9 +807,9 @@ proc ai_move*(qb: ref Quoridor_Board; seconds: float): string =
   # If we didn't do an opening move
   if not moved:
     var i = 2
-    var move = new(array[0 .. 3, int])
+    var move = new(array[0 .. 2, int])
     var test_move: array[0 .. 3, int]
-    var t0 = cputime()
+    let t0 = cputime()
     
     # iterative deepening
     while i < 100:
@@ -778,9 +826,11 @@ proc ai_move*(qb: ref Quoridor_Board; seconds: float): string =
     debugEcho("Level is " & $i)
 
     if move[2] != 0:
-      discard qb.place_wall(move[0], move[1], move[2])
+      if not qb.place_wall(move[0], move[1], move[2]):
+        raise newException(EInvalidValue, "AI tried to play: " & repr(move))
     else:
-      discard qb.move_piece(move[0], move[1])
+      if not qb.move_piece(move[0], move[1]):
+        raise newException(EInvalidValue, "AI tried to play: " & repr(move))
 
   return "e2hw"
 
